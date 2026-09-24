@@ -1,209 +1,154 @@
-# INF8239_U01 — Clasificación de calidad del aire con SVM
+# INF8239_U01 — LAB03 · Ensambles, reducción dimensional y Green AI
 
-Proyecto de Ciencia de Datos II (Maestría en Ciencia de Datos e Inteligencia
-Artificial). Entrena y evalúa una **Máquina de Vectores de Soporte (SVM)** para
-clasificar el nivel de calidad del aire de una región (Good, Moderate, Poor,
-Hazardous) a partir de variables ambientales y demográficas.
+Laboratorio de Ciencia de Datos II (Ejercicio 02). Amplía el problema del LAB02
+(clasificación de calidad del aire) comparando **SVM, Random Forest y boosting** bajo un
+mismo protocolo, aplicando **PCA** y **t-SNE**, y decidiendo un modelo mediante la
+**frontera de Pareto** (equilibrio desempeño–costo, Green AI).
 
-**Dataset:** *Air Quality and Pollution Assessment* (Kaggle · Mujtaba Mateen ·
-**Apache 2.0**), 5,000 muestras y 9 predictores numéricos. Uso académico aprobado.
+- **Dataset:** *Air Quality and Pollution Assessment* (Kaggle · Apache 2.0), reutilizado
+  del LAB02. Target `Air Quality` (4 clases). **Métrica:** F1 macro. **Clase
+  prioritaria:** Hazardous.
+
+> ⚠️ Ejercicio académico. Los tiempos medidos son **contextuales al hardware** y **no**
+> representan consumo energético exacto.
 
 ---
 
-## Estructura del proyecto
+## Estructura (archivos del LAB03)
 
 ```
 INF8239_U01/
-├── data/raw/
-│   └── dataset.csv             # dataset descargado 
-├── docs/
-│   └── ficha_dataset.md        # ficha de procedencia, target y licencia
-├── images/
-│   └── confusion_matrix.png    # gráficos generados
 ├── notebooks/
-│   ├── 00_verificacion.ipynb   # verificación del entorno
-│   ├── 01_svm_guiada.ipynb     # LAB01 · SVM guiado (breast cancer)
-│   └── 02_svm_autorizado.ipynb # LAB02 · SVM con dataset aprobado (calidad del aire)
-├── reports/
-│   ├── svm_best.joblib         # mejor modelo serializado
-│   └── svm_cv_results.csv      # resultados de validación cruzada
+│   └── 03_ensambles_green_ai.ipynb   # notebook principal del LAB03
 ├── src/inf8239_u01/
-│   ├── __init__.py
-│   ├── data.py                 # descarga reproducible (Kaggle API)
-│   ├── environment.py
-│   └── models.py
+│   └── green.py                       # pareto_flags(): frontera de Pareto
 ├── tests/
-│   ├── test_data_contract.py   # contrato de datos del LAB02 (3 pruebas)
-│   ├── test_environment.py
-│   └── test_models.py
-├── .gitignore
-├── README.md
-└── requirements.txt
+│   └── test_green.py                  # 2 pruebas de la frontera de Pareto
+├── reports/
+│   ├── green_ai_results.csv           # catálogo con métricas y costos
+│   ├── tsne_two_seeds.png             # dos proyecciones t-SNE
+│   ├── pareto.png                     # frontera de Pareto (F1 vs. tiempo)
+│   └── models/                        # modelos serializados (.joblib, no versionados)
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## Requisitos
+## Requisitos y reproducción
 
-- **Python 3.10+**
-- Dependencias en `requirements.txt` (`pandas`, `scikit-learn`, `matplotlib`,
-  `joblib`, `kagglehub`, `jupyter`/`ipykernel`, `pytest`).
-- **Credenciales de Kaggle** (para descargar el dataset).
-
----
-
-## Instalación
-
-```powershell
-# Desde la raíz del proyecto
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
+```bash
+source .venv/Scripts/activate        # Git Bash (Windows)
 pip install -r requirements.txt
 ```
 
-### Credenciales de Kaggle (una sola vez)
-
-1. En kaggle.com → tu avatar → **Settings** → **API** → **Create New Token**.
-2. Coloca el `kaggle.json` descargado en `C:\Users\<usuario>\.kaggle\kaggle.json`
-   (o define las variables `KAGGLE_USERNAME` y `KAGGLE_KEY`).
-
----
-
-## Descarga del dataset
-
-La descarga está encapsulada en `src/inf8239_u01/data.py` (la fuente requiere
-autenticación, no expone URL `.csv` directa). Desde el notebook:
-
-```python
-from src.inf8239_u01.data import download_csv
-URL = "https://www.kaggle.com/datasets/mujtabamatin/air-quality-and-pollution-assessment"
-path = download_csv(URL)   # guarda data/raw/dataset.csv
-```
+Reutiliza el dataset descargado en el LAB02 (`data/raw/dataset.csv`). Ejecuta
+`notebooks/03_ensambles_green_ai.ipynb` de inicio a fin. El experimento es determinista
+(`random_state=42`): la partición es idéntica a la del LAB02, lo que **congela el
+protocolo**.
 
 ---
 
-## Target y métrica
+## Metodología (componentes del experimento)
 
-- **Target:** `Air Quality` — clasificación **multiclase** (Good, Moderate, Poor,
-  Hazardous).
-- **Métrica principal:** **F1 macro** (da igual peso a las 4 clases; adecuada ante el
-  desbalance del dataset).
-- **Error más costoso:** clasificar como "Good/Moderate" una región "Hazardous"
-  (no se emite alerta y la población sensible queda expuesta).
+- **Familias de modelos comparadas:** **SVM** (`svm_c1`, `svm_c10`), **Random Forest /
+  bagging** (`rf_100`, `rf_300`) y **boosting** (`boost`, HistGradientBoosting), más una
+  regresión logística de contraste — 6 configuraciones en total.
+- **Reducción dimensional — PCA:** se compara la SVM **con y sin** PCA
+  (`n_components=0.95`), reportando componentes retenidos y varianza acumulada.
+- **Reducción dimensional — t-SNE:** **dos proyecciones con semillas distintas (42 y 7)**
+  para distinguir la estructura estable del ruido aleatorio.
+- **Medición temporal:** cada modelo se ajusta **tres veces** y se reporta la **mediana**
+  del tiempo (`fit_median_s`), reduciendo el ruido de medición.
+- **Costo de despliegue:** se registra el **tamaño serializado** de cada modelo en disco
+  (`size_kb`, vía `joblib`) y el **tiempo de inferencia** sobre la prueba (`predict_ms`).
 
 ---
 
-## Cómo reproducir
+## Catálogo y resultados
 
-1. Activa el entorno virtual e instala dependencias.
-2. Configura las credenciales de Kaggle.
-3. Selecciona el kernel `.venv` en el notebook.
-4. Ejecuta `notebooks/01_svm_guiada.ipynb` en orden (pasos 1–11).
+Seis configuraciones evaluadas sobre la misma prueba (valores reales; los tiempos
+dependen del hardware):
 
-El notebook es **determinista** (`random_state=42` en división y modelo).
+| Modelo | F1 macro | Recall macro | Ajuste mediana (s) | Inferencia (ms) | Tamaño (kb) | Pareto |
+|--------|----------|--------------|--------------------|-----------------|-------------|--------|
+| boost | **0.9389** | 0.9350 | 0.574 | 16.6 | 1217.9 | ✅ |
+| rf_300 | 0.9239 | 0.9154 | 1.018 | 89.1 | 4922.6 | ❌ |
+| rf_100 | 0.9199 | 0.9117 | 0.383 | 38.4 | 1661.0 | ✅ |
+| svm_c1 | 0.9127 | 0.9079 | 0.356 | 30.8 | 111.9 | ✅ |
+| svm_c10 | 0.9116 | 0.9079 | 0.358 | 26.2 | 92.4 | ❌ |
+| logistic | 0.8988 | 0.8906 | 0.039 | 2.9 | 4.0 | ✅ |
+
+(Columnas: `Ajuste mediana` = mediana de 3 repeticiones; `Inferencia` y `Tamaño` = costo
+de despliegue.)
+
+---
+
+## Reducción dimensional
+
+**PCA (95% de varianza):** conserva **7 de 9** componentes (varianza acumulada
+**97.35%**). F1 macro: **0.9127 sin PCA** vs **0.9072 con PCA**. PCA no aporta aquí,
+porque el dataset ya es de baja dimensión.
+
+**t-SNE (semillas 42 y 7):**
+
+![t-SNE con dos semillas](reports/tsne_two_seeds.png)
+
+La clase **Good** se separa con claridad; **Moderate, Poor y Hazardous** se solapan en un
+continuo. La estructura se mantiene entre semillas; solo cambian orientaciones locales.
+La separación visual no valida por sí sola un clasificador.
+
+---
+
+## Frontera de Pareto y decisión Green AI
+
+![Frontera de Pareto](reports/pareto.png)
+
+El máximo desempeño es **boost** (F1 0.9389, mejor recall 0.9350, menor inferencia
+16.6 ms). Como alternativa económica se evalúa **svm_c1** (F1 0.9127):
+
+- Diferencia absoluta de F1: **0.0262** (2.6 puntos).
+- Ahorro de tiempo de ajuste: **~38%** (0.574 s → 0.356 s).
+- Reducción de tamaño: **~91%** (1217.9 kb → 111.9 kb).
+
+Dado que la clase prioritaria es Hazardous y boost tiene mejor recall e inferencia más
+rápida, **se recomienda boost** para un sistema de alertas; svm_c1 (o logistic) es la
+opción Green AI si el reentrenamiento frecuente o la memoria limitada pesan más que 2.6
+puntos de F1. La justificación completa (300–500 palabras) está en el notebook.
 
 ---
 
 ## Pruebas
 
-```powershell
-$env:PYTHONPATH="src"
-python -m pytest -q
+```bash
+PYTHONPATH=src python -m pytest -q
 ```
 
-Verifican el contrato de datos: dataset no vacío, columnas clave presentes y target
-sin nulos con ≥2 clases (3 pruebas).
+`tests/test_green.py` verifica `pareto_flags`: marca correctamente las filas dominadas y
+que un único modelo siempre pertenece a la frontera.
 
 ---
 
-## Resultados
+## Registro del entorno
 
-Distribución de clases (desbalanceado): Good 2000 (40%), Moderate 1500 (30%),
-Poor 1000 (20%), Hazardous 500 (10%).
-
-| Modelo | F1 macro (prueba) |
-|--------|-------------------|
-| Baseline (DummyClassifier) | 0.1429 |
-| SVM (RBF, C=1) | 0.9127 |
-
-Reporte por clase del SVM (conjunto de prueba):
-
-| Clase | Precision | Recall | F1 |
-|-------|-----------|--------|-----|
-| Good | 0.9925 | 0.9950 | 0.9938 |
-| Moderate | 0.9379 | 0.9567 | 0.9472 |
-| Poor | 0.8600 | 0.8600 | 0.8600 |
-| Hazardous | 0.8817 | 0.8200 | 0.8497 |
-
-Accuracy global: **0.9390**. El SVM supera ampliamente la línea base. La clase de
-mayor riesgo, **Hazardous, es la más difícil (recall 0.82)**: el modelo deja pasar
-~18% de las regiones realmente peligrosas, que es el error más costoso a vigilar.
+El notebook imprime Python, sistema operativo, procesador y versión de scikit-learn, que
+son el **contexto de los tiempos** reportados. Los tiempos no equivalen a consumo
+energético; una medición rigurosa requeriría una herramienta específica (p. ej.
+CodeCarbon) declarando región y supuestos.
 
 ---
 
-## Diccionario de datos
+## 10. Entrega y verificación (Ejercicio 02)
 
-| Variable | Significado | Unidad | Disponible al predecir | Transformación | Riesgo |
-|----------|-------------|--------|------------------------|----------------|--------|
-| Temperature | Temperatura media de la región | °C | Sí | StandardScaler | Outliers estacionales |
-| Humidity | Humedad relativa | % | Sí | StandardScaler | Valores fuera de [0–100] |
-| PM2.5 | Partículas finas | µg/m³ | Sí | StandardScaler | Correlación con PM10 |
-| PM10 | Partículas gruesas | µg/m³ | Sí | StandardScaler | Correlación con PM2.5 |
-| NO2 | Dióxido de nitrógeno | ppb | Sí | StandardScaler | Outliers industriales |
-| SO2 | Dióxido de azufre | ppb | Sí | StandardScaler | Outliers industriales |
-| CO | Monóxido de carbono | ppm | Sí | StandardScaler | Escala distinta |
-| Proximity_to_Industrial_Areas | Distancia a zona industrial | km | Sí | StandardScaler | Proxy de contaminación |
-| Population_Density | Densidad poblacional | hab/km² | Sí | StandardScaler | Sesgo urbano/rural |
-| Air Quality | Nivel de calidad del aire (**target**) | categoría | — | Etiqueta de clase | Clases desbalanceadas |
+| # | Criterio | Estado | Evidencia |
+|---|----------|--------|-----------|
+| 1 | Mismo dataset y partición del Ejercicio 01 | ✅ | Protocolo congelado; `train_test_split(test_size=0.20, random_state=42, stratify=y)` idéntico al LAB02 |
+| 2 | Al menos seis configuraciones | ✅ | 6 modelos: logistic, svm_c1, svm_c10, rf_100, rf_300, boost |
+| 3 | SVM, Random Forest y boosting | ✅ | Sección *Metodología* + catálogo (las tres familias) |
+| 4 | PCA o alternativa justificada | ✅ | Sección *Reducción dimensional*: PCA 95% → 7 de 9 comp. (97.35% var.), F1 0.9127 → 0.9072 |
+| 5 | Dos t-SNE con semillas distintas | ✅ | Sección *Reducción dimensional*: semillas 42 y 7 → `reports/tsne_two_seeds.png` |
+| 6 | Tres repeticiones temporales y mediana | ✅ | Columna `Ajuste mediana (s)` (mediana de 3 repeticiones) |
+| 7 | Tamaño serializado e inferencia | ✅ | Columnas `Tamaño (kb)` y `Inferencia (ms)` del catálogo |
+| 8 | CSV, figuras, pruebas y README | ✅ | `green_ai_results.csv`, `tsne_two_seeds.png`, `pareto.png`, `test_green.py`, este README |
+| 9 | Frontera de Pareto y decisión cuantificada | ✅ | `is_pareto` en el CSV + decisión de 300–500 palabras en el notebook |
 
----
-
-## Licencia del dataset
-
-*Air Quality and Pollution Assessment* — **Apache 2.0**. Uso académico.
-
----
-
-## Conclusión
-
-Este trabajo abordó la clasificación del nivel de calidad del aire de una región
-—Good, Moderate, Poor o Hazardous— a partir de nueve variables ambientales y
-demográficas, usando el dataset *Air Quality and Pollution Assessment* de Kaggle
-(licencia Apache 2.0, uso académico aprobado). La unidad de análisis es una región
-caracterizada por sus mediciones, y la decisión que apoya el modelo es la emisión de
-alertas de contaminación.
-
-La selección siguió criterios explícitos: licencia permisiva, 5,000 filas, target
-observable con cuatro clases, variables disponibles al predecir y tamaño compatible con
-CPU. Se compararon dos candidatos y se eligió este por ser 100% numérico, directamente
-compatible con SVM y StandardScaler sin codificación categórica.
-
-La auditoría confirmó un conjunto limpio: sin duplicados, sin valores faltantes y con
-las nueve predictoras numéricas. Al no existir identificadores ni fugas, no se eliminó
-ninguna columna, respetando el criterio de que toda exclusión debe tener una razón
-semántica o de disponibilidad. El preprocesamiento (imputación por mediana y
-estandarización) se encapsuló en un ColumnTransformer dentro de un Pipeline, de modo que
-el escalado se ajusta solo con los datos de entrenamiento, evitando el data leakage.
-
-Se dividió el conjunto en 80/20 de forma estratificada y se comparó un baseline
-(DummyClassifier) contra un SVM con kernel RBF, evaluando con F1 macro para dar igual
-peso a las cuatro clases. Los resultados son claros: el baseline obtuvo un F1 macro de
-0.1429 —al predecir siempre la clase mayoritaria falla en las demás—, mientras que el
-SVM alcanzó 0.9127, con una exactitud global de 0.9390. Esto confirma que las variables
-ambientales contienen señal predictiva fuerte.
-
-El análisis por clase es el hallazgo más relevante. El dataset está desbalanceado (Good
-40%, Moderate 30%, Poor 20%, Hazardous 10%), y precisamente la clase Hazardous —la de
-mayor interés— es la más difícil, con un recall de 0.82: el modelo deja pasar cerca del
-18% de las regiones realmente peligrosas. Como el error más costoso, definido en la
-ficha, es no alertar ante aire peligroso, este es el punto crítico a mejorar; una
-extensión natural sería aplicar class_weight="balanced" o ajustar el umbral de decisión
-para elevar el recall de las clases de riesgo.
-
-La reproducibilidad se aseguró con descarga encapsulada vía API de Kaggle, rutas
-resueltas contra la raíz del proyecto, semilla fija y un contrato de datos con tres
-pruebas automatizadas. Como limitación, el dataset es sintético, por lo que un despliegue
-real exigiría validar con mediciones auténticas y vigilar el sesgo territorial. En
-conjunto, el proyecto demuestra un flujo completo y trazable de selección, auditoría y
-modelado supervisado sobre datos propios.
